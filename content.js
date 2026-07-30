@@ -1,6 +1,9 @@
 // content.js
 // 注入到每个页面（含Chrome内置PDF阅读器）
-// 职责：监听文本选中 -> 计算悬浮窗位置 -> 请求翻译 -> 渲染悬浮窗
+// 职责：
+//   - 单击一个英文单词 -> 词典查询（音标/词性/多条释义/例句 + 目标语言一行义）
+//   - 拖拽选中一段文本 -> 整句翻译
+//   两种交互共用一个悬浮窗，展示区(.ht-popup-body)由各自的渲染函数填充。
 
 (() => {
   let popupEl = null;
@@ -16,26 +19,22 @@
     popupEl.innerHTML = `
       <div class="ht-popup-header">
         <span class="ht-popup-lang"></span>
-        <button class="ht-popup-close" title="关闭">×</button>
+        <button class="ht-popup-close" title="Close">×</button>
       </div>
-      <div class="ht-popup-body">
-        <div class="ht-popup-original"></div>
-        <div class="ht-popup-divider"></div>
-        <div class="ht-popup-result">翻译中…</div>
-      </div>
+      <div class="ht-popup-body"></div>
     `;
     document.documentElement.appendChild(popupEl);
 
     popupEl.querySelector(".ht-popup-close").addEventListener("click", hidePopup);
-    // 鼠标进入悬浮窗时不要被外部点击逻辑关闭
+    // 悬浮窗内部的交互不应触发外部的关闭/取词逻辑
     popupEl.addEventListener("mousedown", (e) => e.stopPropagation());
+    popupEl.addEventListener("click", (e) => e.stopPropagation());
     return popupEl;
   }
 
   function showPopupAt(x, y) {
     const el = ensurePopup();
     el.classList.remove("ht-hidden");
-    // 简单边界保护，避免超出视口
     const margin = 12;
     const maxX = window.innerWidth - 340;
     const maxY = window.innerHeight - 160;
@@ -47,18 +46,37 @@
     if (popupEl) popupEl.classList.add("ht-hidden");
   }
 
-  function setPopupContent({ original, result, targetLangLabel, isError }) {
-    const el = ensurePopup();
-    el.querySelector(".ht-popup-lang").textContent = targetLangLabel || "";
-    el.querySelector(".ht-popup-original").textContent = original || "";
-    const resultEl = el.querySelector(".ht-popup-result");
-    resultEl.textContent = result;
-    resultEl.classList.toggle("ht-popup-error", !!isError);
+  function setHeader(label) {
+    ensurePopup().querySelector(".ht-popup-lang").textContent = label || "";
   }
 
-  // ---------- 划词监听（普通文本 / 常规PDF文字层） ----------
+  function setBodyHTML(html) {
+    ensurePopup().querySelector(".ht-popup-body").innerHTML = html;
+  }
+
+  function setBodyMessage(message, isError) {
+    setBodyHTML(
+      `<div class="ht-popup-result${isError ? " ht-popup-error" : ""}"></div>`
+    );
+    ensurePopup().querySelector(".ht-popup-result").textContent = message;
+  }
+
+  // ---------- 整句翻译渲染（拖拽选中） ----------
+  function renderTranslation({ original, result, isError }) {
+    setBodyHTML(`
+      <div class="ht-popup-original"></div>
+      <div class="ht-popup-divider"></div>
+      <div class="ht-popup-result${isError ? " ht-popup-error" : ""}"></div>
+    `);
+    const body = ensurePopup();
+    body.querySelector(".ht-popup-original").textContent = original || "";
+    body.querySelector(".ht-popup-result").textContent = result || "";
+  }
+
+  // ==========================================================================
+  // 交互 1：拖拽选中一段文本 -> 整句翻译
+  // ==========================================================================
   document.addEventListener("mouseup", (e) => {
-    // 给浏览器一点时间完成选区更新
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => handleSelection(e), 30);
   });
@@ -70,60 +88,47 @@
     }
   });
 
-  function handleSelection(e) {
+  function handleSelection() {
     const selection = window.getSelection();
     const text = selection ? selection.toString().trim() : "";
 
-    if (!text || text.length < 1) {
-      return; // 没有选中内容，不打扰用户，保留上次结果直到用户点别处
-    }
+    // 空选区（普通单击）交给下面的 click -> 单词词典逻辑处理
+    if (!text) return;
     if (text === lastSelectedText) return;
     lastSelectedText = text;
 
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
-    const x = rect.left + window.scrollX;
-    const y = rect.bottom + window.scrollY + 8;
 
     showPopupAt(rect.left, rect.bottom + 8);
     requestTranslation(text);
   }
 
-  // ---------- 请求翻译（转发给 background service worker） ----------
   function requestTranslation(text) {
     chrome.storage.sync.get(["targetLang", "enabled"], (cfg) => {
-      if (cfg.enabled === false) return; // 用户在popup里关闭了插件
+      if (cfg.enabled === false) return;
       const targetLang = cfg.targetLang || "ZH";
 
-      setPopupContent({
-        original: text,
-        result: "翻译中…",
-        targetLangLabel: `→ ${targetLang}`,
-      });
+      setHeader(`Translate → ${targetLang}`);
+      renderTranslation({ original: text, result: "Translating…" });
 
       chrome.runtime.sendMessage(
         { type: "TRANSLATE_TEXT", text, targetLang },
         (response) => {
           if (chrome.runtime.lastError) {
-            setPopupContent({
+            renderTranslation({
               original: text,
-              result: "翻译请求失败，请检查网络或API Key设置",
-              targetLangLabel: `→ ${targetLang}`,
+              result: "Translation request failed. Check your network or API Key.",
               isError: true,
             });
             return;
           }
           if (response && response.ok) {
-            setPopupContent({
-              original: text,
-              result: response.translatedText,
-              targetLangLabel: `→ ${targetLang}`,
-            });
+            renderTranslation({ original: text, result: response.translatedText });
           } else {
-            setPopupContent({
+            renderTranslation({
               original: text,
-              result: (response && response.error) || "翻译失败",
-              targetLangLabel: `→ ${targetLang}`,
+              result: (response && response.error) || "Translation failed",
               isError: true,
             });
           }
@@ -132,17 +137,110 @@
     });
   }
 
-  // ---------- 扫描版PDF：区域框选（占位实现） ----------
-  // 说明：常规文本走上面的 selectionchange 逻辑即可。
-  // 扫描版PDF没有文字层，需要用户按住 Alt 拖框选一块区域，
-  // 对该区域截图后交给OCR识别，再走同样的 requestTranslation 流程。
-  // 这里先留出交互骨架，OCR部分（Tesseract.js）作为下一步接入。
+  // ==========================================================================
+  // 交互 2：单击一个英文单词 -> 词典查询
+  // ==========================================================================
+  document.addEventListener("click", (e) => {
+    if (popupEl && popupEl.contains(e.target)) return;
+
+    // 有非空选区说明是拖拽/双击选词，交给上面的翻译逻辑，避免重复弹窗
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+
+    // 点在链接/按钮/表单等可交互元素上时不打扰，保留其原有行为
+    if (e.target.closest &&
+        e.target.closest("a, button, input, textarea, select, [contenteditable], [role='button']")) {
+      return;
+    }
+
+    chrome.storage.sync.get(["enabled"], (cfg) => {
+      if (cfg.enabled === false) return;
+      const found = getWordAtPoint(e.clientX, e.clientY);
+      if (!found || !found.word) return;
+      lastSelectedText = ""; // 清掉翻译去重缓存，避免影响后续选区
+      showPopupAt(found.rect.left, found.rect.bottom + 8);
+      requestWordLookup(found.word);
+    });
+  });
+
+  // 取鼠标位置下的单词与其屏幕矩形
+  function getWordAtPoint(clientX, clientY) {
+    let range = null;
+    if (document.caretRangeFromPoint) {
+      range = document.caretRangeFromPoint(clientX, clientY);
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(clientX, clientY);
+      if (pos) {
+        range = document.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+        range.collapse(true);
+      }
+    }
+    if (!range) return null;
+
+    const node = range.startContainer;
+    if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+
+    const text = node.textContent;
+    const isWordChar = (ch) => /[A-Za-z'\-]/.test(ch);
+
+    let i = range.startOffset;
+    // 光标落在单词末尾（下一个字符不是词字符）时，回退到词内
+    if (i >= text.length || !isWordChar(text[i])) {
+      if (i > 0 && isWordChar(text[i - 1])) i -= 1;
+    }
+    if (i < 0 || i >= text.length || !isWordChar(text[i])) return null;
+
+    let start = i;
+    let end = i;
+    while (start > 0 && isWordChar(text[start - 1])) start -= 1;
+    while (end < text.length && isWordChar(text[end])) end += 1;
+
+    const word = text.slice(start, end);
+    if (!/[A-Za-z]/.test(word)) return null; // 纯符号不查
+
+    const wordRange = document.createRange();
+    wordRange.setStart(node, start);
+    wordRange.setEnd(node, end);
+    const rect = wordRange.getBoundingClientRect();
+    return { word, rect };
+  }
+
+  function requestWordLookup(word) {
+    chrome.storage.sync.get(["targetLang", "enabled"], (cfg) => {
+      if (cfg.enabled === false) return;
+      const targetLang = cfg.targetLang || "ZH";
+
+      setHeader("Dictionary");
+      setBodyMessage(`Looking up “${word}”…`);
+
+      chrome.runtime.sendMessage(
+        { type: "LOOKUP_WORD", word, targetLang },
+        (response) => {
+          if (chrome.runtime.lastError || !response) {
+            setBodyMessage("Lookup failed. Check your network.", true);
+            return;
+          }
+          if (response.ok) {
+            setBodyHTML(window.HTDict.buildDictionaryHTML(response));
+          } else {
+            setBodyMessage(response.error || "No definition found", true);
+          }
+        }
+      );
+    });
+  }
+
+  // ==========================================================================
+  // 扫描版PDF：区域框选（占位实现，后续接入 OCR）
+  // ==========================================================================
+  // 说明：按住 Alt 拖框选一块区域，对该区域截图交给OCR识别后再走整句翻译。
   let isDragging = false;
   let dragStart = null;
   let selectionBoxEl = null;
 
   document.addEventListener("mousedown", (e) => {
-    if (!e.altKey) return; // 按住 Alt 触发框选模式，避免与普通划词冲突
+    if (!e.altKey) return; // 按住 Alt 触发框选模式，避免与普通划词/取词冲突
     isDragging = true;
     dragStart = { x: e.clientX, y: e.clientY };
     selectionBoxEl = document.createElement("div");

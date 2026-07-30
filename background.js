@@ -13,7 +13,117 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     return true; // 表示会异步调用 sendResponse
   }
+
+  // 单词点击 → 词典查询（英英释义 + 目标语言一行义）
+  if (message.type === "LOOKUP_WORD") {
+    handleLookupWord(message.word, message.targetLang)
+      .then((data) => sendResponse({ ok: true, ...data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message || "查询失败" }));
+    return true;
+  }
 });
+
+// ---------- 单词词典查询 ----------
+// 数据源：Free Dictionary API（api.dictionaryapi.dev，免费、无需API Key）
+// 提供音标、词性、多条释义与例句（英文）。
+// 另外用已有的 DeepL 逻辑把词条翻成用户的目标语言，作为顶部的"一行义"。
+async function handleLookupWord(rawWord, targetLang) {
+  const word = normalizeWord(rawWord);
+  if (!word) throw new Error("无效的单词");
+
+  // 英英词典（结构化释义）
+  const entry = await fetchDictionaryEntry(word);
+
+  // 目标语言"一行义"：尽力而为，DeepL没配Key或失败都不影响英英释义展示
+  let targetGloss = null;
+  try {
+    const cfg = await chrome.storage.sync.get(["apiKey", "isPro", "apiProvider"]);
+    if (cfg.apiKey && (cfg.apiProvider || "deepl") === "deepl") {
+      targetGloss = await translateWithDeepL(entry.word, targetLang, cfg.apiKey, cfg.isPro);
+    }
+  } catch (e) {
+    // 忽略：一行义是可选增强
+  }
+
+  return { ...entry, targetGloss, targetLang: targetLang || "ZH" };
+}
+
+// 只保留字母/连字符/撇号，去掉首尾标点，转小写
+function normalizeWord(raw) {
+  return (raw || "")
+    .toLowerCase()
+    .replace(/[^a-z'-]/g, "")
+    .replace(/^[-']+|[-']+$/g, "");
+}
+
+// 词典API对屈折形式（reads / running / better）不总是命中，
+// 这里做一个轻量的原形候选，命中即返回，避免引入完整的词形还原库。
+function lemmaCandidates(word) {
+  const c = [];
+  if (word.endsWith("ies") && word.length > 4) c.push(word.slice(0, -3) + "y");
+  if (word.endsWith("es") && word.length > 3) c.push(word.slice(0, -2));
+  if (word.endsWith("s") && !word.endsWith("ss")) c.push(word.slice(0, -1));
+  if (word.endsWith("ed") && word.length > 3) {
+    c.push(word.slice(0, -1)); // used -> use
+    c.push(word.slice(0, -2)); // walked -> walk
+  }
+  if (word.endsWith("ing") && word.length > 4) {
+    c.push(word.slice(0, -3)); // walking -> walk
+    c.push(word.slice(0, -3) + "e"); // making -> make
+  }
+  if (word.endsWith("est") && word.length > 4) c.push(word.slice(0, -3));
+  if (word.endsWith("er") && word.length > 3) c.push(word.slice(0, -2));
+  // 去重 + 过滤太短的
+  return [...new Set(c)].filter((w) => w && w.length >= 2 && w !== word);
+}
+
+async function fetchDictionaryEntry(word) {
+  const candidates = [word, ...lemmaCandidates(word)];
+
+  for (const w of candidates) {
+    const resp = await fetch(
+      "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(w)
+    );
+    if (resp.ok) {
+      const json = await resp.json();
+      return parseDictionaryEntry(json, w);
+    }
+    if (resp.status !== 404) {
+      // 非"未找到"的错误（限流/服务异常）直接抛出，不再试其他候选
+      throw new Error(`词典服务错误 (${resp.status})`);
+    }
+  }
+
+  throw new Error(`未找到 “${word}” 的释义`);
+}
+
+function parseDictionaryEntry(json, fallbackWord) {
+  const entries = Array.isArray(json) ? json : [];
+  const first = entries[0] || {};
+  const word = first.word || fallbackWord;
+
+  let phonetic = first.phonetic || null;
+  if (!phonetic && Array.isArray(first.phonetics)) {
+    const p = first.phonetics.find((x) => x && x.text);
+    phonetic = p ? p.text : null;
+  }
+
+  const meanings = [];
+  for (const e of entries) {
+    for (const m of e.meanings || []) {
+      meanings.push({
+        partOfSpeech: m.partOfSpeech || "",
+        // 每个词性最多取3条，避免弹窗过长
+        definitions: (m.definitions || []).slice(0, 3).map((d) => ({
+          definition: d.definition || "",
+          example: d.example || null,
+        })),
+      });
+    }
+  }
+
+  return { word, phonetic, meanings };
+}
 
 async function handleTranslate(text, targetLang) {
   const cfg = await chrome.storage.sync.get(["apiKey", "apiProvider", "isPro"]);

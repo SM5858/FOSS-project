@@ -134,6 +134,12 @@ async function getTesseractWorker() {
   tesseractWorker = await Tesseract.createWorker("eng", 1, {
     workerPath: chrome.runtime.getURL("lib/tesseract/worker.min.js"),
     corePath: chrome.runtime.getURL("lib/tesseract/tesseract-core-simd-lstm.wasm.js"),
+    // MV3必需：默认Tesseract会把worker包进一个blob URL再importScripts(workerPath)，
+    // 但blob worker是opaque origin，无法加载 chrome-extension:// 资源，导致
+    // "Failed to execute 'importScripts'... worker.min.js failed to load"。
+    // 关掉blob包装，直接 new Worker(chrome-extension://.../worker.min.js) 作为扩展自身worker，
+    // 这样才能正常 importScripts 到 corePath 等本地资源。
+    workerBlobURL: false,
     // langPath 未指定：语言包(eng.traineddata)会从 Tesseract.js 默认CDN按需下载并由浏览器缓存。
     // 语言包是纯数据文件（非可执行代码），不属于MV3禁止的"远程代码执行"，但如果要完全离线，
     // 后续可以把 eng.traineddata.gz 下载后放进 lib/tesseract/lang-data/ 并在这里指定本地 langPath。
@@ -268,24 +274,27 @@ function handleWordClick(state, point) {
   showDictionaryPopup(hit, point.x, point.y + 8, state.overlayEl);
 }
 
-// ---------- 悬浮窗（拖拽翻译） ----------
+// ---------- 悬浮窗（拖拽 -> 整句翻译） ----------
 function showTranslatePopup(text, x, y, parentEl) {
   const popup = getOrCreatePopup(parentEl, "ht-translate-popup");
-  popup.classList.remove("ht-hidden");
-  popup.style.left = x + "px";
-  popup.style.top = y + "px";
+  showPopup(popup, x, y);
+  popup.querySelector(".ht-popup-lang").textContent = "Translating…";
+  popup.querySelector(".ht-popup-body").innerHTML = `
+    <div class="ht-popup-original"></div>
+    <div class="ht-popup-divider"></div>
+    <div class="ht-popup-result">翻译中…</div>
+  `;
   popup.querySelector(".ht-popup-original").textContent = text;
-  popup.querySelector(".ht-popup-result").textContent = "翻译中…";
-  popup.querySelector(".ht-popup-result").classList.remove("ht-popup-error");
 
   chrome.storage.sync.get(["targetLang"], (cfg) => {
     const targetLang = cfg.targetLang || "ZH";
-    popup.querySelector(".ht-popup-lang").textContent = `→ ${targetLang}`;
+    popup.querySelector(".ht-popup-lang").textContent = `Translate → ${targetLang}`;
 
     chrome.runtime.sendMessage(
       { type: "TRANSLATE_TEXT", text, targetLang },
       (response) => {
         const resultEl = popup.querySelector(".ht-popup-result");
+        if (!resultEl) return;
         if (chrome.runtime.lastError || !response || !response.ok) {
           resultEl.textContent =
             (response && response.error) || "翻译失败，请检查API Key设置";
@@ -298,18 +307,45 @@ function showTranslatePopup(text, x, y, parentEl) {
   });
 }
 
-// ---------- 悬浮窗（单词词典查询占位） ----------
+// ---------- 悬浮窗（单击单词 -> 词典查询） ----------
+// 用统一的 background LOOKUP_WORD + 共享渲染器 window.HTDict，
+// 与普通网页(content.js)的词典弹窗保持一致。
 function showDictionaryPopup(wordBox, x, y, parentEl) {
   const popup = getOrCreatePopup(parentEl, "ht-translate-popup");
+  showPopup(popup, x, y);
+  popup.querySelector(".ht-popup-lang").textContent = "Dictionary";
+  setPopupMessage(popup, `Looking up “${wordBox.text}”…`, false);
+
+  chrome.storage.sync.get(["targetLang"], (cfg) => {
+    const targetLang = cfg.targetLang || "ZH";
+    chrome.runtime.sendMessage(
+      { type: "LOOKUP_WORD", word: wordBox.text, targetLang },
+      (response) => {
+        if (chrome.runtime.lastError || !response) {
+          setPopupMessage(popup, "查询失败，请检查网络", true);
+          return;
+        }
+        if (response.ok) {
+          popup.querySelector(".ht-popup-body").innerHTML =
+            window.HTDict.buildDictionaryHTML(response);
+        } else {
+          setPopupMessage(popup, response.error || "未找到释义", true);
+        }
+      }
+    );
+  });
+}
+
+function showPopup(popup, x, y) {
   popup.classList.remove("ht-hidden");
   popup.style.left = x + "px";
   popup.style.top = y + "px";
-  popup.querySelector(".ht-popup-lang").textContent = "词典查询";
-  popup.querySelector(".ht-popup-original").textContent = wordBox.text;
-  popup.querySelector(".ht-popup-result").classList.remove("ht-popup-error");
-  popup.querySelector(".ht-popup-result").textContent =
-    `词形还原: ${wordBox.lemma}\n\n（释义功能待接入：等待目标语言和双语词典数据源确定后，` +
-    `在这里调用真正的词典查询，替换当前占位文本即可，其余交互逻辑不需要改）`;
+}
+
+function setPopupMessage(popup, message, isError) {
+  popup.querySelector(".ht-popup-body").innerHTML =
+    `<div class="ht-popup-result${isError ? " ht-popup-error" : ""}"></div>`;
+  popup.querySelector(".ht-popup-result").textContent = message;
 }
 
 function getOrCreatePopup(parentEl, className) {
@@ -322,13 +358,9 @@ function getOrCreatePopup(parentEl, className) {
   popup.innerHTML = `
     <div class="ht-popup-header">
       <span class="ht-popup-lang"></span>
-      <button class="ht-popup-close" title="关闭">×</button>
+      <button class="ht-popup-close" title="Close">×</button>
     </div>
-    <div class="ht-popup-body">
-      <div class="ht-popup-original"></div>
-      <div class="ht-popup-divider"></div>
-      <div class="ht-popup-result"></div>
-    </div>
+    <div class="ht-popup-body"></div>
   `;
   parentEl.appendChild(popup);
   popup.querySelector(".ht-popup-close").addEventListener("click", () => {

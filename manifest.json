@@ -1,29 +1,33 @@
 {
   "manifest_version": 3,
-  "name": "划词悬浮翻译 Highlight & Translate",
+  "name": "Highlight & Translate",
   "version": "0.1.0",
-  "description": "选中文本即时弹出悬浮翻译窗，支持扫描版PDF区域取词翻译",
+  "description": "Instantly shows a floating translation popup for selected text, with area-based word lookup on scanned PDFs.",
   "permissions": ["storage", "activeTab", "scripting", "webNavigation"],
   "host_permissions": [
     "<all_urls>",
     "https://api-free.deepl.com/*",
-    "https://api.deepl.com/*"
+    "https://api.deepl.com/*",
+    "https://api.dictionaryapi.dev/*"
   ],
   "background": {
     "service_worker": "background.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "css": ["content.css"],
-      "js": ["content.js"],
+      "js": ["lib/dict-render.js", "content.js"],
       "run_at": "document_idle",
       "all_frames": true
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "划词悬浮翻译"
+    "default_title": "Highlight & Translate"
   },
   "options_page": "options.html",
   "icons": {
