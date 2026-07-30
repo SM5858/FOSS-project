@@ -1,0 +1,90 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #525659;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+}
+
+#topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #323639;
+  color: #e5e7eb;
+  padding: 8px 16px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#progressTrack {
+  flex: 1;
+  max-width: 240px;
+  height: 4px;
+  background: #4b5563;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#progressFill {
+  height: 100%;
+  width: 0%;
+  background: #3b82f6;
+  transition: width 0.2s ease;
+}
+
+#pageContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 0 60px;
+}
+
+.pdf-page-wrap {
+  position: relative;
+  background: white;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.pdf-page-wrap canvas {
+  display: block;
+}
+
+.pdf-page-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: text;
+}
+
+.ht-page-loading-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.65);
+  color: white;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  z-index: 5;
+}
+
+/* 拖拽选中word-box时的高亮框，同样使用统一坐标系 */
+.ht-word-highlight {
+  position: absolute;
+  background: rgba(59, 130, 246, 0.28);
+  pointer-events: none;
+}
+
+/* 拖拽过程中的选框（视觉反馈，非最终命中结果） */
+.ht-drag-rect {
+  position: absolute;
+  border: 1px dashed #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+  pointer-events: none;
+}

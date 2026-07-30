@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>划词悬浮翻译 - PDF 查看器</title>
+  <link rel="stylesheet" href="viewer.css" />
+  <link rel="stylesheet" href="content.css" />
+</head>
+<body>
+  <div id="topbar">
+    <span id="statusText">正在加载 PDF…</span>
+    <div id="progressTrack"><div id="progressFill"></div></div>
+  </div>
+
+  <div id="pageContainer"></div>
+
+  <!-- 本地打包的 Tesseract.js（UMD格式，暴露全局 Tesseract 对象） -->
+  <script src="lib/tesseract/tesseract.min.js"></script>
+  <!-- 本地打包的 pdf.js + 主逻辑（Manifest V3 不允许远程执行代码，都是本地文件） -->
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>
