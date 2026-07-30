@@ -1,73 +1,73 @@
-# 划词悬浮翻译 (Highlight & Translate)
+# Highlight & Translate
 
-Chrome 浏览器插件：选中文本即弹出悬浮翻译窗，支持扫描版PDF区域取词翻译（OCR部分待接入）。
+A Chrome extension: select text to instantly get a floating translation popup. Also supports word-level selection on scanned PDFs via OCR.
 
-## 目录结构
+## Project Structure
 
 ```
 highlight-translate-extension/
-├── manifest.json        # Manifest V3 配置
-├── content.js            # 普通网页：划词监听 + 悬浮窗渲染
-├── content.css           # 悬浮窗样式（viewer.html 也复用这份）
-├── background.js         # Service Worker：调用DeepL翻译API + 拦截PDF导航跳转到viewer.html
-├── viewer.html/.js/.css  # 自建PDF查看页：pdf.js渲染 + Tesseract OCR + word-box拖拽/点击命中检测
-├── popup.html / .js      # 工具栏弹出：开关插件、切换目标语言
-├── options.html / .js    # 设置页：填写API Key、选择Free/Pro
-├── lib/pdfjs/             # 本地打包的 pdf.js（MV3不允许远程加载可执行代码）
-├── lib/tesseract/         # 本地打包的 Tesseract.js 运行时 + wasm核心
-└── icons/                 # 插件图标（占位图，可替换）
+├── manifest.json        # Manifest V3 config
+├── content.js            # Regular web pages: selection listener + floating popup rendering
+├── content.css           # Popup styling (also reused by viewer.html)
+├── background.js         # Service worker: calls DeepL translation API + intercepts PDF navigation, redirects to viewer.html
+├── viewer.html/.js/.css  # Custom PDF viewer page: pdf.js rendering + Tesseract OCR + word-box drag/click hit-testing
+├── popup.html / .js      # Toolbar popup: enable/disable extension, switch target language
+├── options.html / .js    # Settings page: enter API Key, choose Free/Pro
+├── lib/pdfjs/             # Locally bundled pdf.js (MV3 disallows loading remote executable code)
+├── lib/tesseract/         # Locally bundled Tesseract.js runtime + wasm core
+└── icons/                 # Extension icons (placeholder, can be replaced)
 ```
 
-## PDF 处理架构（重要）
+## PDF Handling Architecture (important)
 
-不再尝试注入Chrome内置PDF阅读器的特殊origin（那是偏门技巧，不同Chrome版本表现不稳定）。改用更常规的做法：
+We no longer try to inject into Chrome's built-in PDF viewer's special origin (that was a fragile, undocumented trick that behaves inconsistently across Chrome versions). Instead we use a more standard approach:
 
 ```
-用户打开一个 .pdf 链接
+User opens a .pdf link
         ↓
-background.js 用 webNavigation 监听到，重定向到 viewer.html?file=<原始PDF地址>
+background.js detects it via webNavigation, redirects to viewer.html?file=<original PDF URL>
         ↓
-viewer.js 用本地pdf.js把每一页渲染到 canvas（原生像素尺寸，不做CSS缩放）
+viewer.js uses local pdf.js to render each page to a canvas (native pixel size, no CSS scaling)
         ↓
-页面滚动到视口时，用本地Tesseract.js对同一个canvas做OCR（懒加载，避免一次性卡死）
+When a page scrolls into view, local Tesseract.js runs OCR on that same canvas (lazy-loaded, to avoid blocking everything at once)
         ↓
-得到 word-box 数组：{ text, bbox:{x0,y0,x1,y1}, pageIndex, lemma }
+Produces a word-box array: { text, bbox:{x0,y0,x1,y1}, pageIndex, lemma }
         ↓
-透明覆盖层做命中检测：
-  - 拖拽跨多个word-box → 拼接文本 → 调用DeepL整句翻译（复用background.js里的逻辑）
-  - 单击一个word-box → 词典查询占位（等目标语言和词典数据源确定后接入）
+A transparent overlay handles hit-testing:
+  - Drag across multiple word-boxes → concatenate text → call DeepL for full-sentence translation (reuses the logic in background.js)
+  - Click a single word-box → dictionary lookup placeholder (to be wired up once target language & dictionary data source are decided)
 ```
 
-**这个架构统一处理扫描版和普通版PDF**——不区分两者，一律走"渲染成canvas + OCR"，好处是坐标系天然统一、代码只有一条路径；代价是普通PDF本来的文字层没被直接利用，OCR会比直接读文字层慢一些，但对课程项目而言这是合理的取舍。
+**This architecture handles scanned and regular PDFs the same way** — no branching logic, everything goes through "render to canvas + OCR." The upside: the coordinate system is naturally unified and there's only one code path. The tradeoff: a regular PDF's existing text layer isn't used directly, so OCR is a bit slower than reading the text layer — but that's a reasonable tradeoff for a course project.
 
-## 本地安装步骤
+## Local Installation
 
-1. 打开 Chrome，访问 `chrome://extensions`
-2. 打开右上角"开发者模式"
-3. 点击"加载已解压的扩展程序"，选择本文件夹
-4. 点击浏览器工具栏的插件图标 → "API Key 设置" → 填入 DeepL API Key 并保存
-   - 免费Key在 https://www.deepl.com/pro-api 注册获取，免费额度每月约50万字符
-   - 免费版Key结尾通常带 `:fx`，记得在设置页选择 "Free"
+1. Open Chrome, go to `chrome://extensions`
+2. Turn on "Developer mode" (top right)
+3. Click "Load unpacked" and select this folder
+4. Click the extension icon in the toolbar → "API Key Settings" → enter your DeepL API Key and save
+   - Get a free key at https://www.deepl.com/pro-api (free tier: ~500,000 characters/month)
+   - Free-tier keys usually end in `:fx` — remember to select "Free" on the settings page
 
-## 当前已实现
+## Currently Implemented
 
-- ✅ 普通网页划词 → 自动弹出悬浮窗 → 调用 DeepL 翻译
-- ✅ PDF（不区分是否扫描版）：自动拦截PDF加载 → 自建viewer渲染 → 滚动到某页时懒加载OCR → word-box数组
-- ✅ PDF中拖拽跨word-box选中 → 拼接文本 → DeepL整句翻译
-- ✅ PDF中单击word-box → 词典查询悬浮窗（内容目前是占位文本，等真正的词典数据源接入）
-- ✅ 目标语言、API Key 的设置与持久化（`chrome.storage.sync`）
+- ✅ Select text on regular web pages → floating popup appears automatically → calls DeepL for translation
+- ✅ PDFs (scanned or regular, no distinction): PDF load is intercepted automatically → rendered in the custom viewer → OCR runs lazily per page → produces word-box array
+- ✅ Drag across word-boxes in a PDF → concatenates text → DeepL full-sentence translation
+- ✅ Click a single word-box in a PDF → dictionary lookup popup (currently placeholder text, pending a real dictionary data source)
+- ✅ Target language and API Key are saved persistently (`chrome.storage.sync`)
 
-## 已知限制 / 需要你们接下来验证的点
+## Known Limitations / Things to Verify Next
 
-1. **PDF拦截依赖URL以 `.pdf` 结尾判断**，覆盖不了"服务器返回PDF但链接没有.pdf后缀"的情况（比如某些在线文档系统），如果需要覆盖更多场景，可以改用 `declarativeNetRequest` 按资源类型匹配，但配置更复杂，目前先用这个简单版本跑通主流程。
-2. **跨域PDF下载**：viewer.js 里用 `fetch(fileUrl)` 下载PDF字节，如果目标网站的PDF有严格的CORS限制，理论上因为插件有 `<all_urls>` host_permissions应该能绕过，但没有覆盖所有奇怪站点的情况，建议多找几个真实网站的PDF链接测试。
-3. **词典查询目前只是占位文本**，`simpleLemmaPlaceholder()` 目前只是转小写，不是真正的词形还原，队友确定目标语言和词典数据源后，直接替换 `viewer.js` 里的 `simpleLemmaPlaceholder()` 和 `showDictionaryPopup()` 里的占位文本即可，其余交互逻辑（拖拽、命中检测、悬浮窗定位）不需要改。
-4. **Tesseract语言包**：目前 `getTesseractWorker()` 里没有指定 `langPath`，语言包会按需从Tesseract.js默认CDN下载，首次OCR可能有几秒延迟。如果要完全离线运行，可以把 `eng.traineddata.gz` 下载后放进 `lib/tesseract/lang-data/` 并在代码里指定本地路径。
-5. **DeepL API Key 明文存在 `chrome.storage.sync`**，仅适合开发/课程项目阶段。
+1. **PDF interception relies on the URL ending in `.pdf`** — this misses cases where a server returns a PDF without a `.pdf` extension in the URL (e.g. some online document systems). If broader coverage is needed, `declarativeNetRequest` matching by resource type is an option, but it's more complex to configure — we're starting with this simpler version to get the main flow working.
+2. **Cross-origin PDF downloads**: `viewer.js` uses `fetch(fileUrl)` to download PDF bytes. In theory the `<all_urls>` host_permissions should bypass CORS restrictions, but this hasn't been tested against every possible site — worth testing with several real-world PDF links.
+3. **Dictionary lookup is currently just placeholder text.** `simpleLemmaPlaceholder()` only lowercases the word right now — it's not real lemmatization. Once the target language and dictionary data source are decided, just replace `simpleLemmaPlaceholder()` and the placeholder text inside `showDictionaryPopup()` in `viewer.js` — no other interaction logic (drag, hit-testing, popup positioning) needs to change.
+4. **Tesseract language data**: `getTesseractWorker()` currently doesn't specify a `langPath`, so the language pack downloads on demand from Tesseract.js's default CDN — the first OCR run may have a few seconds of delay. For fully offline operation, download `eng.traineddata.gz` ahead of time, place it in `lib/tesseract/lang-data/`, and point to it locally in the code.
+5. **The DeepL API Key is stored in plaintext in `chrome.storage.sync`** — fine for development/coursework, not production-ready.
 
-## 下一步建议
+## Suggested Next Steps
 
-- 接入真正的词典数据源（WordNet占位 → 双语词典），替换 `showDictionaryPopup()`
-- 接入真正的lemmatization库（`wink-lemmatizer` / `compromise`），替换 `simpleLemmaPlaceholder()`
-- 悬浮窗增加"复制译文"按钮
-- 支持相机拍照输入（`<input type="file" accept="image/*" capture>`），跳过pdf.js直接进Tesseract
+- Wire up a real dictionary data source (WordNet as placeholder → bilingual dictionary), replacing `showDictionaryPopup()`
+- Wire up a real lemmatization library (`wink-lemmatizer` / `compromise`), replacing `simpleLemmaPlaceholder()`
+- Add a "copy translation" button to the popup
+- Support camera photo input (`<input type="file" accept="image/*" capture>`), skipping pdf.js and feeding straight into Tesseract
