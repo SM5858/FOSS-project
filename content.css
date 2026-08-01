@@ -35,6 +35,23 @@
   letter-spacing: 0.02em;
 }
 
+.ht-popup-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ht-lang-select {
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #374151;
+  max-width: 140px;
+  cursor: pointer;
+}
+
 .ht-popup-close {
   border: none;
   background: transparent;

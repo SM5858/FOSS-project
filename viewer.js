@@ -36,32 +36,32 @@ async function main() {
   const params = new URLSearchParams(location.search);
   const fileUrl = params.get("file");
   if (!fileUrl) {
-    setStatus("未提供PDF文件地址（缺少 file 参数）");
+    setStatus("No PDF address provided (missing 'file' parameter).");
     return;
   }
 
-  setStatus("正在下载 PDF…");
+  setStatus("Downloading PDF…");
   let pdfBytes;
   try {
     const resp = await fetch(fileUrl);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     pdfBytes = await resp.arrayBuffer();
   } catch (err) {
-    setStatus(`PDF下载失败：${err.message}。可能是跨域限制或链接已失效。`);
+    setStatus(`PDF download failed: ${err.message}. This may be due to cross-origin restrictions or a broken link.`);
     return;
   }
 
-  setStatus("正在解析 PDF…");
+  setStatus("Parsing PDF…");
   const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
   const pdfDoc = await loadingTask.promise;
 
-  setStatus(`正在渲染 ${pdfDoc.numPages} 页…`);
+  setStatus(`Rendering ${pdfDoc.numPages} page(s)…`);
   for (let i = 1; i <= pdfDoc.numPages; i++) {
     await renderPage(pdfDoc, i);
     setProgress(i / pdfDoc.numPages);
   }
 
-  setStatus(`共 ${pdfDoc.numPages} 页 · 滚动到某页时会自动识别文字（首次稍慢）`);
+  setStatus(`${pdfDoc.numPages} page(s) · Text is recognized automatically as you scroll (first time may be slow).`);
   observeLazyOcr();
 }
 
@@ -91,7 +91,7 @@ async function renderPage(pdfDoc, pageNumber) {
 
   const badge = document.createElement("div");
   badge.className = "ht-page-loading-badge";
-  badge.textContent = "等待识别…";
+  badge.textContent = "Waiting for OCR…";
 
   wrap.appendChild(canvas);
   wrap.appendChild(overlay);
@@ -152,7 +152,7 @@ async function runOcrForPage(pageIndex) {
   const state = pagesState[pageIndex];
   if (!state || state.ocrDone || state.ocrRunning) return;
   state.ocrRunning = true;
-  state.badgeEl.textContent = "识别中…";
+  state.badgeEl.textContent = "Recognizing…";
 
   try {
     const worker = await getTesseractWorker();
@@ -174,7 +174,7 @@ async function runOcrForPage(pageIndex) {
     state.ocrDone = true;
     state.badgeEl.remove();
   } catch (err) {
-    state.badgeEl.textContent = "识别失败";
+    state.badgeEl.textContent = "OCR failed";
     console.error("OCR failed on page", pageIndex, err);
   } finally {
     state.ocrRunning = false;
@@ -297,17 +297,17 @@ function handleWordClick(state, point) {
 function showTranslatePopup(text, x, y, parentEl) {
   const popup = getOrCreatePopup(parentEl, "ht-translate-popup");
   showPopup(popup, x, y);
-  popup.querySelector(".ht-popup-lang").textContent = "Translating…";
-  popup.querySelector(".ht-popup-body").innerHTML = `
-    <div class="ht-popup-original"></div>
-    <div class="ht-popup-divider"></div>
-    <div class="ht-popup-result">翻译中…</div>
-  `;
-  popup.querySelector(".ht-popup-original").textContent = text;
 
-  chrome.storage.sync.get(["targetLang"], (cfg) => {
-    const targetLang = cfg.targetLang || "ZH";
-    popup.querySelector(".ht-popup-lang").textContent = `Translate → ${targetLang}`;
+  const run = (targetLang) => {
+    popup._htRerun = (lang) => run(lang);
+    popup.querySelector(".ht-popup-lang").textContent = "Translate";
+    popup.querySelector(".ht-lang-select").value = targetLang;
+    popup.querySelector(".ht-popup-body").innerHTML = `
+      <div class="ht-popup-original"></div>
+      <div class="ht-popup-divider"></div>
+      <div class="ht-popup-result">Translating…</div>
+    `;
+    popup.querySelector(".ht-popup-original").textContent = text;
 
     chrome.runtime.sendMessage(
       { type: "TRANSLATE_TEXT", text, targetLang },
@@ -316,14 +316,16 @@ function showTranslatePopup(text, x, y, parentEl) {
         if (!resultEl) return;
         if (chrome.runtime.lastError || !response || !response.ok) {
           resultEl.textContent =
-            (response && response.error) || "翻译失败，请检查API Key设置";
+            (response && response.error) || "Translation failed. Check your API Key in Settings.";
           resultEl.classList.add("ht-popup-error");
           return;
         }
         resultEl.textContent = response.translatedText;
       }
     );
-  });
+  };
+
+  chrome.storage.sync.get(["targetLang"], (cfg) => run(cfg.targetLang || "ZH"));
 }
 
 // ---------- 悬浮窗（单击单词 -> 词典查询） ----------
@@ -332,27 +334,31 @@ function showTranslatePopup(text, x, y, parentEl) {
 function showDictionaryPopup(wordBox, x, y, parentEl) {
   const popup = getOrCreatePopup(parentEl, "ht-translate-popup");
   showPopup(popup, x, y);
-  popup.querySelector(".ht-popup-lang").textContent = "Dictionary";
-  setPopupMessage(popup, `Looking up “${wordBox.text}”…`, false);
 
-  chrome.storage.sync.get(["targetLang"], (cfg) => {
-    const targetLang = cfg.targetLang || "ZH";
+  const run = (targetLang) => {
+    popup._htRerun = (lang) => run(lang);
+    popup.querySelector(".ht-popup-lang").textContent = "Dictionary";
+    popup.querySelector(".ht-lang-select").value = targetLang;
+    setPopupMessage(popup, `Looking up “${wordBox.text}”…`, false);
+
     chrome.runtime.sendMessage(
       { type: "LOOKUP_WORD", word: wordBox.text, targetLang },
       (response) => {
         if (chrome.runtime.lastError || !response) {
-          setPopupMessage(popup, "查询失败，请检查网络", true);
+          setPopupMessage(popup, "Lookup failed. Check your network.", true);
           return;
         }
         if (response.ok) {
           popup.querySelector(".ht-popup-body").innerHTML =
             window.HTDict.buildDictionaryHTML(response);
         } else {
-          setPopupMessage(popup, response.error || "未找到释义", true);
+          setPopupMessage(popup, response.error || "No definition found", true);
         }
       }
     );
-  });
+  };
+
+  chrome.storage.sync.get(["targetLang"], (cfg) => run(cfg.targetLang || "ZH"));
 }
 
 function showPopup(popup, x, y) {
@@ -377,11 +383,23 @@ function getOrCreatePopup(parentEl, className) {
   popup.innerHTML = `
     <div class="ht-popup-header">
       <span class="ht-popup-lang"></span>
-      <button class="ht-popup-close" title="Close">×</button>
+      <div class="ht-popup-header-right">
+        <select class="ht-lang-select" title="Target language"></select>
+        <button class="ht-popup-close" title="Close">×</button>
+      </div>
     </div>
     <div class="ht-popup-body"></div>
   `;
   parentEl.appendChild(popup);
+
+  window.HTDict.fillLangSelect(popup.querySelector(".ht-lang-select"), null);
+  // 在弹窗里换语言：保存为默认值 + 用新语言重跑当前查询/翻译（每个弹窗记住自己的重跑闭包）
+  popup.querySelector(".ht-lang-select").addEventListener("change", (e) => {
+    const lang = e.target.value;
+    chrome.storage.sync.set({ targetLang: lang });
+    if (popup._htRerun) popup._htRerun(lang);
+  });
+
   popup.querySelector(".ht-popup-close").addEventListener("click", () => {
     popup.classList.add("ht-hidden");
   });

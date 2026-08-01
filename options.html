@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>划词悬浮翻译 - 设置</title>
+  <title>Highlight &amp; Translate - Settings</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
@@ -39,35 +39,28 @@
   </style>
 </head>
 <body>
-  <h1>划词悬浮翻译 - 设置</h1>
-  <p class="desc">配置翻译服务的 API Key 和默认目标语言</p>
+  <h1>Highlight &amp; Translate - Settings</h1>
+  <p class="desc">Configure the translation service API Key and default target language.</p>
 
   <label for="apiKey">DeepL API Key</label>
-  <input type="text" id="apiKey" placeholder="在 deepl.com 注册后获取" />
-  <div class="hint">免费版key结尾通常带 :fx，前往 deepl.com/pro-api 获取</div>
+  <input type="text" id="apiKey" placeholder="Get one after signing up at deepl.com" />
+  <div class="hint">Free keys usually end with :fx. Get one at deepl.com/pro-api</div>
 
-  <label>账号类型</label>
+  <label>Account type</label>
   <div class="radio-row">
     <label><input type="radio" name="plan" value="free" checked /> Free</label>
     <label><input type="radio" name="plan" value="pro" /> Pro</label>
   </div>
 
-  <label for="targetLang">默认目标语言</label>
-  <select id="targetLang">
-    <option value="ZH">中文</option>
-    <option value="EN-US">English</option>
-    <option value="JA">日本語</option>
-    <option value="KO">한국어</option>
-    <option value="FR">Français</option>
-    <option value="DE">Deutsch</option>
-    <option value="ES">Español</option>
-  </select>
+  <label for="targetLang">Default target language</label>
+  <select id="targetLang"></select>
 
   <div>
-    <button id="saveBtn">保存设置</button>
+    <button id="saveBtn">Save settings</button>
   </div>
   <div id="status"></div>
 
+  <script src="lib/dict-render.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

@@ -9,7 +9,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true, translatedText });
       })
       .catch((err) => {
-        sendResponse({ ok: false, error: err.message || "翻译失败" });
+        sendResponse({ ok: false, error: err.message || "Translation failed" });
       });
     return true; // 表示会异步调用 sendResponse
   }
@@ -18,7 +18,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "LOOKUP_WORD") {
     handleLookupWord(message.word, message.targetLang)
       .then((data) => sendResponse({ ok: true, ...data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message || "查询失败" }));
+      .catch((err) => sendResponse({ ok: false, error: err.message || "Lookup failed" }));
     return true;
   }
 });
@@ -29,7 +29,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // 另外用已有的 DeepL 逻辑把词条翻成用户的目标语言，作为顶部的"一行义"。
 async function handleLookupWord(rawWord, targetLang) {
   const word = normalizeWord(rawWord);
-  if (!word) throw new Error("无效的单词");
+  if (!word) throw new Error("Invalid word");
 
   // 英英词典（结构化释义）
   const entry = await fetchDictionaryEntry(word);
@@ -90,11 +90,11 @@ async function fetchDictionaryEntry(word) {
     }
     if (resp.status !== 404) {
       // 非"未找到"的错误（限流/服务异常）直接抛出，不再试其他候选
-      throw new Error(`词典服务错误 (${resp.status})`);
+      throw new Error(`Dictionary service error (${resp.status})`);
     }
   }
 
-  throw new Error(`未找到 “${word}” 的释义`);
+  throw new Error(`No definition found for “${word}”`);
 }
 
 function parseDictionaryEntry(json, fallbackWord) {
@@ -129,7 +129,7 @@ async function handleTranslate(text, targetLang) {
   const cfg = await chrome.storage.sync.get(["apiKey", "apiProvider", "isPro"]);
 
   if (!cfg.apiKey) {
-    throw new Error("尚未设置API Key，请点击插件图标进入设置页面填写");
+    throw new Error("No API Key set. Click the extension icon to open Settings and add one.");
   }
 
   const provider = cfg.apiProvider || "deepl";
@@ -137,7 +137,7 @@ async function handleTranslate(text, targetLang) {
     return translateWithDeepL(text, targetLang, cfg.apiKey, cfg.isPro);
   }
 
-  throw new Error(`暂不支持的翻译供应商: ${provider}`);
+  throw new Error(`Unsupported translation provider: ${provider}`);
 }
 
 async function translateWithDeepL(text, targetLang, apiKey, isPro) {
@@ -159,13 +159,13 @@ async function translateWithDeepL(text, targetLang, apiKey, isPro) {
 
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "");
-    throw new Error(`DeepL API 错误 (${resp.status}): ${errText || "请检查API Key是否有效"}`);
+    throw new Error(`DeepL API error (${resp.status}): ${errText || "check that your API Key is valid"}`);
   }
 
   const data = await resp.json();
   const translation = data && data.translations && data.translations[0];
   if (!translation) {
-    throw new Error("DeepL 返回结果为空");
+    throw new Error("DeepL returned an empty result");
   }
   return translation.text;
 }

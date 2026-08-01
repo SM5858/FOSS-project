@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <style>
@@ -62,10 +62,10 @@
   </style>
 </head>
 <body>
-  <h2>划词悬浮翻译</h2>
+  <h2>Highlight &amp; Translate</h2>
 
   <div class="row">
-    <span>启用插件</span>
+    <span>Enable extension</span>
     <label class="switch">
       <input type="checkbox" id="enabledToggle" />
       <span class="slider"></span>
@@ -73,20 +73,13 @@
   </div>
 
   <div class="row">
-    <span>目标语言</span>
-    <select id="langSelect">
-      <option value="ZH">中文</option>
-      <option value="EN-US">English</option>
-      <option value="JA">日本語</option>
-      <option value="KO">한국어</option>
-      <option value="FR">Français</option>
-      <option value="DE">Deutsch</option>
-      <option value="ES">Español</option>
-    </select>
+    <span>Target language</span>
+    <select id="langSelect"></select>
   </div>
 
-  <a class="options-link" href="options.html" target="_blank">API Key 设置 →</a>
+  <a class="options-link" href="options.html" target="_blank">API Key settings →</a>
 
+  <script src="lib/dict-render.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

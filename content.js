@@ -9,6 +9,8 @@
   let popupEl = null;
   let lastSelectedText = "";
   let hideTimer = null;
+  // 记录当前弹窗展示的内容，语言下拉切换时用它以新语言重跑同一个查询/翻译
+  let currentRerun = null;
 
   // ---------- 悬浮窗 DOM ----------
   function ensurePopup() {
@@ -19,11 +21,23 @@
     popupEl.innerHTML = `
       <div class="ht-popup-header">
         <span class="ht-popup-lang"></span>
-        <button class="ht-popup-close" title="Close">×</button>
+        <div class="ht-popup-header-right">
+          <select class="ht-lang-select" title="Target language"></select>
+          <button class="ht-popup-close" title="Close">×</button>
+        </div>
       </div>
       <div class="ht-popup-body"></div>
     `;
     document.documentElement.appendChild(popupEl);
+
+    const langSel = popupEl.querySelector(".ht-lang-select");
+    window.HTDict.fillLangSelect(langSel, null);
+    // 在弹窗里换语言：立即保存为默认值 + 用新语言重跑当前查询/翻译
+    langSel.addEventListener("change", () => {
+      const lang = langSel.value;
+      chrome.storage.sync.set({ targetLang: lang });
+      if (currentRerun) currentRerun(lang);
+    });
 
     popupEl.querySelector(".ht-popup-close").addEventListener("click", hidePopup);
     // 悬浮窗内部的交互不应触发外部的关闭/取词逻辑
@@ -46,8 +60,10 @@
     if (popupEl) popupEl.classList.add("ht-hidden");
   }
 
-  function setHeader(label) {
-    ensurePopup().querySelector(".ht-popup-lang").textContent = label || "";
+  function setHeader(label, lang) {
+    const el = ensurePopup();
+    el.querySelector(".ht-popup-lang").textContent = label || "";
+    if (lang) el.querySelector(".ht-lang-select").value = lang;
   }
 
   function setBodyHTML(html) {
@@ -104,12 +120,10 @@
     requestTranslation(text);
   }
 
-  function requestTranslation(text) {
-    chrome.storage.sync.get(["targetLang", "enabled"], (cfg) => {
-      if (cfg.enabled === false) return;
-      const targetLang = cfg.targetLang || "ZH";
-
-      setHeader(`Translate → ${targetLang}`);
+  function requestTranslation(text, targetLangOverride) {
+    const run = (targetLang) => {
+      currentRerun = (lang) => requestTranslation(text, lang);
+      setHeader("Translate", targetLang);
       renderTranslation({ original: text, result: "Translating…" });
 
       chrome.runtime.sendMessage(
@@ -134,7 +148,16 @@
           }
         }
       );
-    });
+    };
+
+    if (targetLangOverride) {
+      run(targetLangOverride);
+    } else {
+      chrome.storage.sync.get(["targetLang", "enabled"], (cfg) => {
+        if (cfg.enabled === false) return;
+        run(cfg.targetLang || "ZH");
+      });
+    }
   }
 
   // ==========================================================================
@@ -206,12 +229,10 @@
     return { word, rect };
   }
 
-  function requestWordLookup(word) {
-    chrome.storage.sync.get(["targetLang", "enabled"], (cfg) => {
-      if (cfg.enabled === false) return;
-      const targetLang = cfg.targetLang || "ZH";
-
-      setHeader("Dictionary");
+  function requestWordLookup(word, targetLangOverride) {
+    const run = (targetLang) => {
+      currentRerun = (lang) => requestWordLookup(word, lang);
+      setHeader("Dictionary", targetLang);
       setBodyMessage(`Looking up “${word}”…`);
 
       chrome.runtime.sendMessage(
@@ -228,7 +249,13 @@
           }
         }
       );
-    });
+    };
+
+    if (targetLangOverride) {
+      run(targetLangOverride);
+    } else {
+      chrome.storage.sync.get(["targetLang"], (cfg) => run(cfg.targetLang || "ZH"));
+    }
   }
 
   // ==========================================================================
