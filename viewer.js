@@ -156,11 +156,14 @@ async function runOcrForPage(pageIndex) {
 
   try {
     const worker = await getTesseractWorker();
-    const { data } = await worker.recognize(state.canvas);
+    // Tesseract v5+ 默认只返回 text，必须显式开启 blocks 输出才能拿到词级 bbox。
+    // 不开的话 data.words 为空，页面上就没有可点击的单词框。
+    const { data } = await worker.recognize(state.canvas, {}, { blocks: true });
 
-    // data.words 已经自带 bbox 和 text，直接映射成我们和队友约定的数据契约
-    state.wordBoxes = (data.words || [])
-      .filter((w) => w.text && w.text.trim().length > 0)
+    // 从 blocks -> paragraphs -> lines -> words 收集词（每个词自带 bbox 和 text），
+    // 映射成我们和队友约定的数据契约。
+    state.wordBoxes = collectWords(data)
+      .filter((w) => w.text && w.text.trim().length > 0 && w.bbox)
       .map((w) => ({
         text: w.text,
         bbox: { x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 },
@@ -176,6 +179,22 @@ async function runOcrForPage(pageIndex) {
   } finally {
     state.ocrRunning = false;
   }
+}
+
+// 从 Tesseract 的 blocks 结构里把所有词展平出来。
+// v5+ 已移除扁平的 data.words，只能走 blocks -> paragraphs -> lines -> words；
+// 但若某个版本仍提供 data.words，也优先使用，向后兼容。
+function collectWords(data) {
+  if (Array.isArray(data.words) && data.words.length) return data.words;
+  const out = [];
+  for (const block of data.blocks || []) {
+    for (const para of block.paragraphs || []) {
+      for (const line of para.lines || []) {
+        for (const w of line.words || []) out.push(w);
+      }
+    }
+  }
+  return out;
 }
 
 // 占位的词形还原：目前只是转小写。真正的 lemmatization（wink-lemmatizer / compromise）
