@@ -171,6 +171,8 @@ async function runOcrForPage(pageIndex) {
         lemma: simpleLemmaPlaceholder(w.text),
       }));
 
+    mergeHyphenatedWords(state.wordBoxes);
+
     state.ocrDone = true;
     state.badgeEl.remove();
   } catch (err) {
@@ -195,6 +197,93 @@ function collectWords(data) {
     }
   }
   return out;
+}
+
+// 检测双栏（多栏）排版：用单词覆盖的"密度直方图"找页面中央的低谷（栏间距/gutter）。
+// 用密度低谷而不是"完全空白"，这样即使页脚页码/扫描噪点横跨中缝也不会误判。
+// 返回该 gutter 中心 x 作为分栏线；单栏页面返回 null。
+function detectColumnSplitX(wordBoxes) {
+  if (wordBoxes.length < 25) return null; // 词太少，不太可能是真正的多栏
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (const wb of wordBoxes) {
+    if (wb.bbox.x0 < minX) minX = wb.bbox.x0;
+    if (wb.bbox.x1 > maxX) maxX = wb.bbox.x1;
+  }
+  const pageW = maxX - minX;
+  if (pageW <= 0) return null;
+
+  const BINS = 200; // 细分辨率，才能抓到很窄的栏间距（书籍扫描常只有 ~2% 页宽）
+  const binW = pageW / BINS;
+  const hist = new Array(BINS).fill(0);
+  for (const wb of wordBoxes) {
+    let b0 = Math.max(0, Math.floor((wb.bbox.x0 - minX) / binW));
+    let b1 = Math.min(BINS - 1, Math.floor((wb.bbox.x1 - minX) / binW));
+    for (let b = b0; b <= b1; b++) hist[b]++;
+  }
+
+  let peak = 0;
+  for (let b = 0; b < BINS; b++) if (hist[b] > peak) peak = hist[b];
+  if (peak < 5) return null; // 每栏至少要有若干行才算数
+
+  // 中间 20%~80% 找覆盖最少的 bin（最深的谷底）。栏间距虽窄，但整列高度都空，
+  // 覆盖接近 0；而单词间的空隙每行位置不同，叠加后并不空。所以找"最深"而非"最宽"。
+  const lo = Math.floor(BINS * 0.2);
+  const hi = Math.ceil(BINS * 0.8);
+  let valleyBin = lo;
+  for (let b = lo; b < hi; b++) if (hist[b] < hist[valleyBin]) valleyBin = b;
+
+  // 谷底必须足够深：正文栏里任何 x 都被大多数行覆盖，只有真正的栏间距才接近空
+  const deepThresh = peak * 0.2;
+  if (hist[valleyBin] > deepThresh) return null;
+
+  // 把谷底扩展成连续的低密度带，取中心作为分栏线
+  let a = valleyBin;
+  while (a > 0 && hist[a - 1] <= deepThresh) a--;
+  let c = valleyBin;
+  while (c < BINS - 1 && hist[c + 1] <= deepThresh) c++;
+
+  // 左右两侧都要有高密度正文栏，才是真正的双栏（否则可能只是页面右侧空白）
+  let leftHigh = false;
+  let rightHigh = false;
+  for (let b = 0; b < a; b++) if (hist[b] >= peak * 0.5) { leftHigh = true; break; }
+  for (let b = c + 1; b < BINS; b++) if (hist[b] >= peak * 0.5) { rightHigh = true; break; }
+  if (!leftHigh || !rightHigh) return null;
+
+  return minX + ((a + c + 1) / 2) * binW;
+}
+
+// 处理跨行连字符断词：por-（行末） + trayed（下一行行首） -> portrayed
+// 不靠数组相邻（那样双栏会把右栏行末接到左栏下一行），而是用几何方式找后半：
+//   同一栏 + 紧邻的下一行 + 该行最靠左（行首）的词。
+// 给两半都打上合并后的完整词 joinedWord，点击任意一半都能查到整词。
+function mergeHyphenatedWords(wordBoxes) {
+  const splitX = detectColumnSplitX(wordBoxes);
+  const columnOf = (wb) =>
+    splitX === null ? 0 : (wb.bbox.x0 + wb.bbox.x1) / 2 < splitX ? 0 : 1;
+
+  for (const cur of wordBoxes) {
+    if (!cur.text.endsWith("-") || cur.text.length < 2) continue;
+    const lineH = cur.bbox.y1 - cur.bbox.y0;
+    const curCol = columnOf(cur);
+
+    let best = null;
+    for (const w of wordBoxes) {
+      if (w === cur) continue;
+      if (columnOf(w) !== curCol) continue; // 必须同一栏
+      const dy = w.bbox.y0 - cur.bbox.y0;
+      if (dy <= lineH * 0.5) continue; // 同行或更高，跳过
+      if (w.bbox.y0 - cur.bbox.y1 > lineH * 1.5) continue; // 太远，不是紧邻下一行
+      if (!/^[A-Za-z]/.test(w.text)) continue; // 后半应以字母开头
+      if (!best || w.bbox.x0 < best.bbox.x0) best = w; // 取最靠左（行首）
+    }
+
+    if (best) {
+      const joined = cur.text.slice(0, -1) + best.text;
+      cur.joinedWord = joined;
+      best.joinedWord = joined;
+    }
+  }
 }
 
 // 占位的词形还原：目前只是转小写。真正的 lemmatization（wink-lemmatizer / compromise）
@@ -281,16 +370,28 @@ function handleDragSelect(state, rect) {
 
   if (hit.length === 0) return;
 
-  const text = hit.map((wb) => wb.text).join(" ");
+  // 拼接文本时，跨行连字符断词直接接上去（去掉 "-"、不加空格）
+  let text = "";
+  for (let i = 0; i < hit.length; i++) {
+    const t = hit[i].text;
+    if (t.endsWith("-") && i < hit.length - 1) {
+      text += t.slice(0, -1);
+    } else {
+      text += t + " ";
+    }
+  }
+  text = text.trim();
+
   const lastBox = hit[hit.length - 1].bbox;
   showTranslatePopup(text, lastBox.x1, lastBox.y1 + 8, state.overlayEl);
 }
 
-// 单击一个word-box → 词典查询（占位，等待目标语言和词典数据源确定）
+// 单击一个word-box → 词典查询（跨行断词用合并后的完整词）
 function handleWordClick(state, point) {
   const hit = state.wordBoxes.find((wb) => boxContainsPoint(wb.bbox, point));
   if (!hit) return;
-  showDictionaryPopup(hit, point.x, point.y + 8, state.overlayEl);
+  const word = hit.joinedWord || hit.text;
+  showDictionaryPopup({ text: word }, point.x, point.y + 8, state.overlayEl);
 }
 
 // ---------- 悬浮窗（拖拽 -> 整句翻译） ----------

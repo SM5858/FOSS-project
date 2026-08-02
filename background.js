@@ -48,12 +48,36 @@ async function handleLookupWord(rawWord, targetLang) {
   return { ...entry, targetGloss, targetLang: targetLang || "ZH" };
 }
 
-// 只保留字母/连字符/撇号，去掉首尾标点，转小写
+// 只保留字母/连字符/撇号，去掉首尾标点，转小写；并去掉所有格。
+// dog's -> dog, dogs' -> dogs, James's -> james
 function normalizeWord(raw) {
-  return (raw || "")
-    .toLowerCase()
-    .replace(/[^a-z'-]/g, "")
-    .replace(/^[-']+|[-']+$/g, "");
+  let w = (raw || "").toLowerCase().replace(/[^a-z'-]/g, "");
+  w = w.replace(/'s$/, ""); // 所有格 's
+  w = w.replace(/^[-']+|[-']+$/g, ""); // 去掉首尾的 ' 和 -
+  return w;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 免费词典API(dictionaryapi.dev)会不定时返回 502/503 等瞬时错误，
+// 重试基本都能成功。这里对 5xx 和网络错误做几次带退避的重试；
+// 200 和 404 都是"确定结果"，立即返回不再重试。
+async function fetchDictWithRetry(word, attempts = 3) {
+  const url =
+    "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word);
+  let resp = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      resp = await fetch(url);
+    } catch (e) {
+      resp = null; // 网络错误 -> 重试
+    }
+    if (resp && (resp.ok || resp.status === 404)) return resp;
+    if (i < attempts - 1) await delay(300 * (i + 1)); // 300ms, 600ms 退避
+  }
+  return resp; // 重试用尽后的最后一次响应（可能是 5xx）或 null
 }
 
 // 词典API对屈折形式（reads / running / better）不总是命中，
@@ -79,21 +103,24 @@ function lemmaCandidates(word) {
 
 async function fetchDictionaryEntry(word) {
   const candidates = [word, ...lemmaCandidates(word)];
+  let sawServerError = false;
 
   for (const w of candidates) {
-    const resp = await fetch(
-      "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(w)
-    );
-    if (resp.ok) {
+    const resp = await fetchDictWithRetry(w);
+    if (resp && resp.ok) {
       const json = await resp.json();
       return parseDictionaryEntry(json, w);
     }
-    if (resp.status !== 404) {
-      // 非"未找到"的错误（限流/服务异常）直接抛出，不再试其他候选
-      throw new Error(`Dictionary service error (${resp.status})`);
-    }
+    // 5xx（重试后仍失败）或网络错误：记下来，继续试下一个候选
+    if (!resp || resp.status >= 500) sawServerError = true;
+    // 404：这个候选确实没有，继续试下一个
   }
 
+  // 只有当所有候选都是"没找到(404)"时才说没释义；
+  // 若期间遇到服务端错误，则提示稍后重试（避免把瞬时故障误报为"无此词"）。
+  if (sawServerError) {
+    throw new Error("Dictionary service is temporarily unavailable. Please try again.");
+  }
   throw new Error(`No definition found for “${word}”`);
 }
 
