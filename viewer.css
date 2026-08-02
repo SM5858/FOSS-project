@@ -74,14 +74,14 @@ body {
   z-index: 5;
 }
 
-/* 拖拽选中word-box时的高亮框，同样使用统一坐标系 */
+/* Highlight box shown when dragging across word-boxes, uses the same unified coordinate system */
 .ht-word-highlight {
   position: absolute;
   background: rgba(59, 130, 246, 0.28);
   pointer-events: none;
 }
 
-/* 拖拽过程中的选框（视觉反馈，非最终命中结果） */
+/* Selection box shown while dragging (visual feedback only, not the final hit result) */
 .ht-drag-rect {
   position: absolute;
   border: 1px dashed #3b82f6;

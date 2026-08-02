@@ -1,7 +1,7 @@
 const enabledToggle = document.getElementById("enabledToggle");
 const langSelect = document.getElementById("langSelect");
 
-// 语言列表来自共享的 window.HTDict（与页内弹窗、options 共用同一份）
+// The language list comes from the shared window.HTDict (shared with the in-page popup and options)
 window.HTDict.fillLangSelect(langSelect, null);
 
 chrome.storage.sync.get(["enabled", "targetLang"], (cfg) => {

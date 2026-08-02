@@ -1,6 +1,6 @@
 // background.js (Manifest V3 service worker)
-// 职责：接收 content script 的翻译请求，调用云端翻译API，返回结果
-// 目前默认接入 DeepL API，可在 translateWithDeepL 之外扩展其他供应商
+// Responsibility: receive translation requests from content scripts, call the cloud translation API, return results
+// Currently defaults to the DeepL API; other providers can be added alongside translateWithDeepL
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "TRANSLATE_TEXT") {
@@ -11,10 +11,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((err) => {
         sendResponse({ ok: false, error: err.message || "Translation failed" });
       });
-    return true; // 表示会异步调用 sendResponse
+    return true; // indicates sendResponse will be called asynchronously
   }
 
-  // 单词点击 → 词典查询（英英释义 + 目标语言一行义）
+  // Word click -> dictionary lookup (English definitions + one-line target-language gloss)
   if (message.type === "LOOKUP_WORD") {
     handleLookupWord(message.word, message.targetLang)
       .then((data) => sendResponse({ ok: true, ...data }))
@@ -23,18 +23,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// ---------- 单词词典查询 ----------
-// 数据源：Free Dictionary API（api.dictionaryapi.dev，免费、无需API Key）
-// 提供音标、词性、多条释义与例句（英文）。
-// 另外用已有的 DeepL 逻辑把词条翻成用户的目标语言，作为顶部的"一行义"。
+// ---------- Word dictionary lookup ----------
+// Data source: Free Dictionary API (api.dictionaryapi.dev, free, no API Key required)
+// Provides phonetics, part of speech, multiple definitions, and examples (in English).
+// Also uses the existing DeepL logic to translate the word into the user's target language, shown as the "one-line gloss" at the top.
 async function handleLookupWord(rawWord, targetLang) {
   const word = normalizeWord(rawWord);
   if (!word) throw new Error("Invalid word");
 
-  // 英英词典（结构化释义）
+  // English-English dictionary (structured definitions)
   const entry = await fetchDictionaryEntry(word);
 
-  // 目标语言"一行义"：尽力而为，DeepL没配Key或失败都不影响英英释义展示
+  // Target-language "one-line gloss": best-effort only; missing DeepL key or failure doesn't affect the English definitions shown
   let targetGloss = null;
   try {
     const cfg = await chrome.storage.sync.get(["apiKey", "isPro", "apiProvider"]);
@@ -42,18 +42,18 @@ async function handleLookupWord(rawWord, targetLang) {
       targetGloss = await translateWithDeepL(entry.word, targetLang, cfg.apiKey, cfg.isPro);
     }
   } catch (e) {
-    // 忽略：一行义是可选增强
+    // Ignored: the one-line gloss is an optional enhancement
   }
 
   return { ...entry, targetGloss, targetLang: targetLang || "ZH" };
 }
 
-// 只保留字母/连字符/撇号，去掉首尾标点，转小写；并去掉所有格。
+// Keep only letters/hyphens/apostrophes, strip leading/trailing punctuation, lowercase; also strip possessives.
 // dog's -> dog, dogs' -> dogs, James's -> james
 function normalizeWord(raw) {
   let w = (raw || "").toLowerCase().replace(/[^a-z'-]/g, "");
-  w = w.replace(/'s$/, ""); // 所有格 's
-  w = w.replace(/^[-']+|[-']+$/g, ""); // 去掉首尾的 ' 和 -
+  w = w.replace(/'s$/, ""); // possessive 's
+  w = w.replace(/^[-']+|[-']+$/g, ""); // strip leading/trailing ' and -
   return w;
 }
 
@@ -61,9 +61,9 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 免费词典API(dictionaryapi.dev)会不定时返回 502/503 等瞬时错误，
-// 重试基本都能成功。这里对 5xx 和网络错误做几次带退避的重试；
-// 200 和 404 都是"确定结果"，立即返回不再重试。
+// The free dictionary API (dictionaryapi.dev) occasionally returns transient errors like 502/503,
+// which usually succeed on retry. Here we retry a few times with backoff on 5xx and network errors;
+// 200 and 404 are both "definitive results" and return immediately without retrying.
 async function fetchDictWithRetry(word, attempts = 3) {
   const url =
     "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word);
@@ -72,16 +72,16 @@ async function fetchDictWithRetry(word, attempts = 3) {
     try {
       resp = await fetch(url);
     } catch (e) {
-      resp = null; // 网络错误 -> 重试
+      resp = null; // network error -> retry
     }
     if (resp && (resp.ok || resp.status === 404)) return resp;
-    if (i < attempts - 1) await delay(300 * (i + 1)); // 300ms, 600ms 退避
+    if (i < attempts - 1) await delay(300 * (i + 1)); // 300ms, 600ms backoff
   }
-  return resp; // 重试用尽后的最后一次响应（可能是 5xx）或 null
+  return resp; // the last response after retries are exhausted (may be 5xx), or null
 }
 
-// 词典API对屈折形式（reads / running / better）不总是命中，
-// 这里做一个轻量的原形候选，命中即返回，避免引入完整的词形还原库。
+// The dictionary API doesn't always match inflected forms (reads / running / better),
+// so we generate a few lightweight base-form candidates and return on the first hit, avoiding a full lemmatization library.
 function lemmaCandidates(word) {
   const c = [];
   if (word.endsWith("ies") && word.length > 4) c.push(word.slice(0, -3) + "y");
@@ -97,7 +97,7 @@ function lemmaCandidates(word) {
   }
   if (word.endsWith("est") && word.length > 4) c.push(word.slice(0, -3));
   if (word.endsWith("er") && word.length > 3) c.push(word.slice(0, -2));
-  // 去重 + 过滤太短的
+  // Dedupe + filter out ones that are too short
   return [...new Set(c)].filter((w) => w && w.length >= 2 && w !== word);
 }
 
@@ -111,13 +111,13 @@ async function fetchDictionaryEntry(word) {
       const json = await resp.json();
       return parseDictionaryEntry(json, w);
     }
-    // 5xx（重试后仍失败）或网络错误：记下来，继续试下一个候选
+    // 5xx (still failing after retries) or a network error: note it and try the next candidate
     if (!resp || resp.status >= 500) sawServerError = true;
-    // 404：这个候选确实没有，继续试下一个
+    // 404: this candidate genuinely doesn't exist, try the next one
   }
 
-  // 只有当所有候选都是"没找到(404)"时才说没释义；
-  // 若期间遇到服务端错误，则提示稍后重试（避免把瞬时故障误报为"无此词"）。
+  // Only report "no definition" once every candidate comes back 404;
+  // if a server error occurred along the way, suggest retrying later instead (to avoid misreporting a transient failure as "word doesn't exist").
   if (sawServerError) {
     throw new Error("Dictionary service is temporarily unavailable. Please try again.");
   }
@@ -140,7 +140,7 @@ function parseDictionaryEntry(json, fallbackWord) {
     for (const m of e.meanings || []) {
       meanings.push({
         partOfSpeech: m.partOfSpeech || "",
-        // 每个词性最多取3条，避免弹窗过长
+        // Keep at most 3 definitions per part of speech, to avoid an overly long popup
         definitions: (m.definitions || []).slice(0, 3).map((d) => ({
           definition: d.definition || "",
           example: d.example || null,
@@ -197,21 +197,21 @@ async function translateWithDeepL(text, targetLang, apiKey, isPro) {
   return translation.text;
 }
 
-// ---------- PDF拦截：跳转到自建的 pdf.js + OCR 查看页 ----------
-// 说明：Chrome默认会用自己内置的PDF viewer打开.pdf链接（一个特殊的内置扩展origin，
-// 很难稳定地从外部content script注入）。这里改用更常规的做法：
-// 监听导航，一旦发现目标是PDF，就把这个tab重定向到我们自己打包的 viewer.html，
-// 由 viewer.html 内部用 pdf.js 渲染 + Tesseract.js 做OCR，取得统一坐标系的word-box。
+// ---------- PDF interception: redirect to our own pdf.js + OCR viewer page ----------
+// Note: by default Chrome opens .pdf links with its own built-in PDF viewer (a special built-in extension origin,
+// which is hard to reliably inject into from an external content script). Instead we use a more standard approach:
+// Listen for navigation, and once the target looks like a PDF, redirect that tab to our own bundled viewer.html,
+// where viewer.html renders with pdf.js + runs OCR with Tesseract.js to get a word-box array in a unified coordinate system.
 //
-// 已知限制：这里用URL路径是否以 .pdf 结尾做判断，覆盖不了"服务器返回PDF但URL没有.pdf后缀"
-// 的情况（比如某些在线文档系统）。如果需要覆盖更多场景，后续可以改用
-// declarativeNetRequest 按 resourceType 匹配，但那个方式配置更复杂，先用这个简单版本。
+// Known limitation: this checks whether the URL path ends in .pdf, which misses "server returns a PDF but the URL has no .pdf extension"
+// cases (e.g. some online document systems). If broader coverage is needed later, this could switch to
+// declarativeNetRequest matching by resourceType, but that's more complex to configure — starting with this simpler version.
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-  if (details.frameId !== 0) return; // 只处理主frame，忽略iframe
+  if (details.frameId !== 0) return; // only handle the main frame, ignore iframes
 
   const url = details.url;
   const isOwnViewer = url.startsWith(chrome.runtime.getURL("viewer.html"));
-  if (isOwnViewer) return; // 避免自己跳转自己，造成死循环
+  if (isOwnViewer) return; // avoid redirecting to ourselves, which would create an infinite loop
 
   const looksLikePdf = /\.pdf(\?|#|$)/i.test(url);
   if (!looksLikePdf) return;
@@ -221,7 +221,7 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   chrome.tabs.update(details.tabId, { url: viewerUrl });
 });
 
-// 插件安装时设置默认配置
+// Set default settings when the extension is installed
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.sync.get(["targetLang", "enabled", "apiProvider"], (cfg) => {
     const defaults = {};
