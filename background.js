@@ -34,18 +34,23 @@ async function handleLookupWord(rawWord, targetLang) {
   // 英英词典（结构化释义）
   const entry = await fetchDictionaryEntry(word);
 
-  // 目标语言"一行义"：尽力而为，DeepL没配Key或失败都不影响英英释义展示
+  // 目标语言"一行义"：用 DeepL 把词条翻成目标语言。
+  // glossStatus 让弹窗知道为什么没有一行义（没配Key / 出错），从而给出提示，
+  // 而不是静默地只显示英英释义（看起来像坏了）。
   let targetGloss = null;
-  try {
-    const cfg = await chrome.storage.sync.get(["apiKey", "isPro", "apiProvider"]);
-    if (cfg.apiKey && (cfg.apiProvider || "deepl") === "deepl") {
+  let glossStatus = "ok";
+  const cfg = await chrome.storage.sync.get(["apiKey", "isPro", "apiProvider"]);
+  if (cfg.apiKey && (cfg.apiProvider || "deepl") === "deepl") {
+    try {
       targetGloss = await translateWithDeepL(entry.word, targetLang, cfg.apiKey, cfg.isPro);
+    } catch (e) {
+      glossStatus = "error";
     }
-  } catch (e) {
-    // 忽略：一行义是可选增强
+  } else {
+    glossStatus = "no-key";
   }
 
-  return { ...entry, targetGloss, targetLang: targetLang || "ZH" };
+  return { ...entry, targetGloss, glossStatus, targetLang: targetLang || "ZH" };
 }
 
 // 只保留字母/连字符/撇号，去掉首尾标点，转小写；并去掉所有格。
