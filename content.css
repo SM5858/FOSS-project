@@ -139,6 +139,16 @@
   text-transform: uppercase;
 }
 
+.ht-dict-gloss-hint {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #fef9c3;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #854d0e;
+  line-height: 1.4;
+}
+
 .ht-dict-pos-block {
   margin-top: 10px;
   max-height: 220px;

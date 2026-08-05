@@ -38,7 +38,9 @@ body {
 #pageContainer {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  /* safe center：页面比窗口窄时居中；比窗口宽时改为左对齐，
+     否则居中会把页面左侧推到负坐标、横向滚动也够不到，导致左侧被裁掉。 */
+  align-items: safe center;
   gap: 16px;
   padding: 20px 0 60px;
 }

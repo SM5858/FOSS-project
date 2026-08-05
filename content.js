@@ -90,18 +90,32 @@
   }
 
   // ==========================================================================
-  // 交互 1：拖拽选中一段文本 -> 整句翻译
+  // 交互 1：拖拽选中一段文本 -> 整句翻译（只在"真正拖拽"时触发；双击不算）
   // ==========================================================================
-  document.addEventListener("mouseup", (e) => {
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => handleSelection(e), 30);
+  let pressX = 0;
+  let pressY = 0;
+  let movedDuringPress = false;
+
+  document.addEventListener("mousedown", (e) => {
+    pressX = e.clientX;
+    pressY = e.clientY;
+    movedDuringPress = false;
+    // 点击悬浮窗以外的地方就关闭它
+    if (popupEl && !popupEl.contains(e.target)) hidePopup();
   });
 
-  // 点击页面空白处关闭悬浮窗
-  document.addEventListener("mousedown", (e) => {
-    if (popupEl && !popupEl.contains(e.target)) {
-      hidePopup();
+  document.addEventListener("mousemove", (e) => {
+    if (Math.abs(e.clientX - pressX) > 4 || Math.abs(e.clientY - pressY) > 4) {
+      movedDuringPress = true;
     }
+  });
+
+  document.addEventListener("mouseup", (e) => {
+    clearTimeout(hideTimer);
+    // 只有真正拖拽（鼠标移动过）才走整句翻译；单击/双击不在这里处理，
+    // 这样双击查词时不会同时弹出翻译。
+    if (!movedDuringPress) return;
+    hideTimer = setTimeout(() => handleSelection(e), 30);
   });
 
   function handleSelection() {
@@ -161,16 +175,14 @@
   }
 
   // ==========================================================================
-  // 交互 2：单击一个英文单词 -> 词典查询
+  // 交互 2：双击一个英文单词 -> 词典查询
+  // 用双击而不是单击：单击是网页/应用（如 Google Docs 的 File/Edit 工具栏）到处都在
+  // 用的动作，用单击查词会把这些界面挡住；双击某个词是"查这个词"的自然手势，几乎不冲突。
   // ==========================================================================
-  document.addEventListener("click", (e) => {
+  document.addEventListener("dblclick", (e) => {
     if (popupEl && popupEl.contains(e.target)) return;
 
-    // 有非空选区说明是拖拽/双击选词，交给上面的翻译逻辑，避免重复弹窗
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().trim()) return;
-
-    // 点在链接/按钮/表单等可交互元素上时不打扰，保留其原有行为
+    // 双击链接/按钮/输入框等可交互元素时不打扰，保留其原有行为
     if (e.target.closest &&
         e.target.closest("a, button, input, textarea, select, [contenteditable], [role='button']")) {
       return;
@@ -180,7 +192,7 @@
       if (cfg.enabled === false) return;
       const found = getWordAtPoint(e.clientX, e.clientY);
       if (!found || !found.word) return;
-      lastSelectedText = ""; // 清掉翻译去重缓存，避免影响后续选区
+      lastSelectedText = ""; // 避免双击产生的选区被翻译去重逻辑影响
       showPopupAt(found.rect.left, found.rect.bottom + 8);
       requestWordLookup(found.word);
     });
