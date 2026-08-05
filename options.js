@@ -12,10 +12,10 @@ function setSelectedPlan(plan) {
   if (radio) radio.checked = true;
 }
 
-// 语言列表来自共享的 window.HTDict（与 popup、页内弹窗共用同一份）
+// The language list comes from the shared window.HTDict (shared with popup and the in-page popup)
 window.HTDict.fillLangSelect(targetLangSelect, null);
 
-// 加载已保存的配置
+// Load saved settings
 chrome.storage.sync.get(["apiKey", "targetLang", "isPro"], (cfg) => {
   if (cfg.apiKey) apiKeyInput.value = cfg.apiKey;
   if (cfg.targetLang) targetLangSelect.value = cfg.targetLang;

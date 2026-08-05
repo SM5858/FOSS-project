@@ -14,11 +14,11 @@
 
   <div id="pageContainer"></div>
 
-  <!-- 本地打包的 Tesseract.js（UMD格式，暴露全局 Tesseract 对象） -->
+  <!-- Locally bundled Tesseract.js (UMD format, exposes global Tesseract object) -->
   <script src="lib/tesseract/tesseract.min.js"></script>
-  <!-- 词典弹窗共享渲染器（与 content.js 共用，暴露全局 window.HTDict） -->
+  <!-- Shared dictionary popup renderer (also used by content.js, exposes global window.HTDict) -->
   <script src="lib/dict-render.js"></script>
-  <!-- 本地打包的 pdf.js + 主逻辑（Manifest V3 不允许远程执行代码，都是本地文件） -->
+  <!-- Locally bundled pdf.js + main logic (MV3 disallows remote code execution, everything is local) -->
   <script type="module" src="viewer.js"></script>
 </body>
 </html>

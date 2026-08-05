@@ -1,18 +1,18 @@
 // content.js
-// 注入到每个页面（含Chrome内置PDF阅读器）
-// 职责：
-//   - 单击一个英文单词 -> 词典查询（音标/词性/多条释义/例句 + 目标语言一行义）
-//   - 拖拽选中一段文本 -> 整句翻译
-//   两种交互共用一个悬浮窗，展示区(.ht-popup-body)由各自的渲染函数填充。
+// Injected into every page (including Chrome's built-in PDF viewer)
+// Responsibilities:
+//   - Click an English word -> dictionary lookup (phonetic/POS/definitions/examples + one-line target-language gloss)
+//   - Drag-select a span of text -> full-sentence translation
+//   Both interactions share one popup; the content area (.ht-popup-body) is filled by their respective render functions.
 
 (() => {
   let popupEl = null;
   let lastSelectedText = "";
   let hideTimer = null;
-  // 记录当前弹窗展示的内容，语言下拉切换时用它以新语言重跑同一个查询/翻译
+  // Tracks what's currently shown in the popup, so switching the language dropdown can re-run the same lookup/translation in the new language
   let currentRerun = null;
 
-  // ---------- 悬浮窗 DOM ----------
+  // ---------- Popup DOM ----------
   function ensurePopup() {
     if (popupEl) return popupEl;
     popupEl = document.createElement("div");
@@ -32,7 +32,7 @@
 
     const langSel = popupEl.querySelector(".ht-lang-select");
     window.HTDict.fillLangSelect(langSel, null);
-    // 在弹窗里换语言：立即保存为默认值 + 用新语言重跑当前查询/翻译
+    // Changing language inside the popup: save it as the new default immediately + re-run the current lookup/translation in the new language
     langSel.addEventListener("change", () => {
       const lang = langSel.value;
       chrome.storage.sync.set({ targetLang: lang });
@@ -40,7 +40,7 @@
     });
 
     popupEl.querySelector(".ht-popup-close").addEventListener("click", hidePopup);
-    // 悬浮窗内部的交互不应触发外部的关闭/取词逻辑
+    // Interactions inside the popup shouldn't trigger the outer close/lookup logic
     popupEl.addEventListener("mousedown", (e) => e.stopPropagation());
     popupEl.addEventListener("click", (e) => e.stopPropagation());
     return popupEl;
@@ -77,7 +77,7 @@
     ensurePopup().querySelector(".ht-popup-result").textContent = message;
   }
 
-  // ---------- 整句翻译渲染（拖拽选中） ----------
+  // ---------- Sentence translation rendering (drag-select) ----------
   function renderTranslation({ original, result, isError }) {
     setBodyHTML(`
       <div class="ht-popup-original"></div>
@@ -90,7 +90,8 @@
   }
 
   // ==========================================================================
-  // 交互 1：拖拽选中一段文本 -> 整句翻译（只在"真正拖拽"时触发；双击不算）
+  // Interaction 1: drag-select a span of text -> full-sentence translation
+  // (only fires on a real drag; a double-click does not count)
   // ==========================================================================
   let pressX = 0;
   let pressY = 0;
@@ -100,7 +101,7 @@
     pressX = e.clientX;
     pressY = e.clientY;
     movedDuringPress = false;
-    // 点击悬浮窗以外的地方就关闭它
+    // Clicking outside the popup closes it
     if (popupEl && !popupEl.contains(e.target)) hidePopup();
   });
 
@@ -112,8 +113,8 @@
 
   document.addEventListener("mouseup", (e) => {
     clearTimeout(hideTimer);
-    // 只有真正拖拽（鼠标移动过）才走整句翻译；单击/双击不在这里处理，
-    // 这样双击查词时不会同时弹出翻译。
+    // Only a real drag (mouse moved) triggers sentence translation; single/double clicks
+    // are handled elsewhere, so double-clicking a word won't also pop up a translation.
     if (!movedDuringPress) return;
     hideTimer = setTimeout(() => handleSelection(e), 30);
   });
@@ -122,7 +123,7 @@
     const selection = window.getSelection();
     const text = selection ? selection.toString().trim() : "";
 
-    // 空选区（普通单击）交给下面的 click -> 单词词典逻辑处理
+    // Empty selection (a plain click) is handled by the click -> word dictionary logic below
     if (!text) return;
     if (text === lastSelectedText) return;
     lastSelectedText = text;
@@ -175,14 +176,15 @@
   }
 
   // ==========================================================================
-  // 交互 2：双击一个英文单词 -> 词典查询
-  // 用双击而不是单击：单击是网页/应用（如 Google Docs 的 File/Edit 工具栏）到处都在
-  // 用的动作，用单击查词会把这些界面挡住；双击某个词是"查这个词"的自然手势，几乎不冲突。
+  // Interaction 2: double-click an English word -> dictionary lookup
+  // Double-click, not single-click: single-click is used everywhere by web apps
+  // (e.g. Google Docs' File/Edit toolbar), so single-click lookup would cover them up;
+  // double-clicking a word is the natural "look this up" gesture and rarely conflicts.
   // ==========================================================================
   document.addEventListener("dblclick", (e) => {
     if (popupEl && popupEl.contains(e.target)) return;
 
-    // 双击链接/按钮/输入框等可交互元素时不打扰，保留其原有行为
+    // Don't interfere when double-clicking links/buttons/inputs etc.; preserve their normal behavior
     if (e.target.closest &&
         e.target.closest("a, button, input, textarea, select, [contenteditable], [role='button']")) {
       return;
@@ -192,13 +194,13 @@
       if (cfg.enabled === false) return;
       const found = getWordAtPoint(e.clientX, e.clientY);
       if (!found || !found.word) return;
-      lastSelectedText = ""; // 避免双击产生的选区被翻译去重逻辑影响
+      lastSelectedText = ""; // Clear the translation dedup cache so the double-click selection doesn't affect it
       showPopupAt(found.rect.left, found.rect.bottom + 8);
       requestWordLookup(found.word);
     });
   });
 
-  // 取鼠标位置下的单词与其屏幕矩形
+  // Get the word under the mouse position and its screen rect
   function getWordAtPoint(clientX, clientY) {
     let range = null;
     if (document.caretRangeFromPoint) {
@@ -220,7 +222,7 @@
     const isWordChar = (ch) => /[A-Za-z'\-]/.test(ch);
 
     let i = range.startOffset;
-    // 光标落在单词末尾（下一个字符不是词字符）时，回退到词内
+    // If the caret lands right after a word (next char isn't a word char), step back into the word
     if (i >= text.length || !isWordChar(text[i])) {
       if (i > 0 && isWordChar(text[i - 1])) i -= 1;
     }
@@ -232,7 +234,7 @@
     while (end < text.length && isWordChar(text[end])) end += 1;
 
     const word = text.slice(start, end);
-    if (!/[A-Za-z]/.test(word)) return null; // 纯符号不查
+    if (!/[A-Za-z]/.test(word)) return null; // Don't look up pure punctuation
 
     const wordRange = document.createRange();
     wordRange.setStart(node, start);
@@ -271,15 +273,15 @@
   }
 
   // ==========================================================================
-  // 扫描版PDF：区域框选（占位实现，后续接入 OCR）
+  // Scanned PDFs: area drag-select (placeholder, OCR to be wired up next)
   // ==========================================================================
-  // 说明：按住 Alt 拖框选一块区域，对该区域截图交给OCR识别后再走整句翻译。
+  // Hold Alt and drag to select an area; the screenshot of that area is handed to OCR, then to full-sentence translation.
   let isDragging = false;
   let dragStart = null;
   let selectionBoxEl = null;
 
   document.addEventListener("mousedown", (e) => {
-    if (!e.altKey) return; // 按住 Alt 触发框选模式，避免与普通划词/取词冲突
+    if (!e.altKey) return; // Hold Alt to trigger drag-select mode, avoiding conflicts with normal text selection/word lookup
     isDragging = true;
     dragStart = { x: e.clientX, y: e.clientY };
     selectionBoxEl = document.createElement("div");
@@ -306,8 +308,8 @@
     if (!isDragging) return;
     isDragging = false;
     if (selectionBoxEl) {
-      // TODO: 下一步在此处调用 Tesseract.js 对该区域截图做OCR识别，
-      // 识别结果文本再传入 requestTranslation()
+      // TODO: next step is to call Tesseract.js here to OCR the screenshot of this area,
+      // then feed the recognized text into requestTranslation()
       selectionBoxEl.remove();
       selectionBoxEl = null;
     }

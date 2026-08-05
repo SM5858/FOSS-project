@@ -99,7 +99,7 @@
   color: #dc2626;
 }
 
-/* ---------- 词典弹窗（单击单词） ---------- */
+/* ---------- Dictionary popup (click a word) ---------- */
 .ht-dict-head {
   display: flex;
   align-items: baseline;
@@ -189,7 +189,7 @@
   color: #6b7280;
 }
 
-/* 扫描PDF区域框选 */
+/* Scanned PDF area drag-select */
 #ht-selection-box {
   position: fixed;
   z-index: 2147483646;
